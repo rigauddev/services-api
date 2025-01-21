@@ -22,7 +22,7 @@ def create_app():
     app.config['MAIL_PASSWORD'] = 'suasenha'
 
     db.init_app(app)
-    bcrypt.init_app(app)
+    bcrypt.init_app(app)# Estrutura reorganizada para uma melhor separação de responsabilidades e manutenção
     jwt.init_app(app)
     mail.init_app(app)
 
