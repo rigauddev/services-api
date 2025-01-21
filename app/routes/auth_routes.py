@@ -1,76 +1,70 @@
 from flask import Blueprint, request, jsonify
-from ..models.user_model import User
-from .. import db, bcrypt, mail, jwt
-from itsdangerous import URLSafeTimedSerializer
+from flask_jwt_extended import create_access_token, jwt_required
 from flask_mail import Message
-from flask_jwt_extended import create_access_token
-
-serializer = URLSafeTimedSerializer('sua-chave-secreta')
+from .. import db, bcrypt, mail
+from ..models.user_model import User
 
 auth = Blueprint('auth', __name__)
 
-@auth.route('/register', methods=['POST'])
-def register():
-    data = request.json
-    hashed_password = bcrypt.generate_password_hash(data['password']).decode('utf-8')
-    new_user = User(email=data['email'], password=hashed_password, user_type=data['user_type'])
-    db.session.add(new_user)
-    db.session.commit()
-
-    # Envia e-mail de validação
-    token = serializer.dumps(data['email'], salt='email-confirm')
-    confirm_url = f"http://localhost:5000/confirm_email/{token}"
-    msg = Message('Confirme seu e-mail', sender='seuemail@gmail.com', recipients=[data['email']])
-    msg.body = f'Clique no link para confirmar seu e-mail: {confirm_url}'
-    mail.send(msg)
-
-    return jsonify({"message": "Usuário registrado. Verifique seu e-mail para confirmação."}), 201
-
-@auth.route('/confirm_email/<token>', methods=['GET'])
-def confirm_email(token):
-    try:
-        email = serializer.loads(token, salt='email-confirm', max_age=3600)
-        user = User.query.filter_by(email=email).first()
-        if user:
-            user.is_verified = True
-            db.session.commit()
-            return jsonify({"message": "E-mail confirmado com sucesso."})
-    except Exception as e:
-        return jsonify({"error": "Token inválido ou expirado."}), 400
-
+# Rota para login
 @auth.route('/login', methods=['POST'])
 def login():
     data = request.json
-    user = User.query.filter_by(email=data['email']).first()
-    if user and bcrypt.check_password_hash(user.password, data['password']):
-        if not user.is_verified:
-            return jsonify({"error": "E-mail não confirmado."}), 401
-        access_token = create_access_token(identity={"id": user.id, "user_type": user.user_type})
-        return jsonify({"access_token": access_token}), 200
-    return jsonify({"error": "Credenciais inválidas."}), 401
+    email = data.get('email')
+    password = data.get('password')
 
-@auth.route('/reset_password_request', methods=['POST'])
-def reset_password_request():
+    if not email or not password:
+        return jsonify({"error": "Email e senha são obrigatórios"}), 400
+
+    user = User.query.filter_by(email=email).first()
+    if user and bcrypt.check_password_hash(user.password, password):
+        access_token = create_access_token(identity={"id": user.id, "email": user.email})
+        return jsonify({"access_token": access_token, "message": "Login bem-sucedido"}), 200
+    else:
+        return jsonify({"error": "Credenciais inválidas"}), 401
+
+# Rota para registro de usuário
+@auth.route('/register', methods=['POST'])
+def register():
     data = request.json
-    user = User.query.filter_by(email=data['email']).first()
-    if user:
-        token = serializer.dumps(data['email'], salt='password-reset')
-        reset_url = f"http://localhost:5000/reset_password/{token}"
-        msg = Message('Redefinição de Senha', sender='seuemail@gmail.com', recipients=[data['email']])
-        msg.body = f'Clique no link para redefinir sua senha: {reset_url}'
-        mail.send(msg)
-        return jsonify({"message": "Instruções para redefinir a senha enviadas por e-mail."}), 200
-    return jsonify({"error": "E-mail não encontrado."}), 404
+    email = data.get('email')
+    password = data.get('password')
+    user_type = data.get('user_type')  # 'client' ou 'provider'
 
-@auth.route('/reset_password/<token>', methods=['POST'])
-def reset_password(token):
-    try:
-        email = serializer.loads(token, salt='password-reset', max_age=3600)
-        user = User.query.filter_by(email=email).first()
-        if user:
-            data = request.json
-            user.password = bcrypt.generate_password_hash(data['password']).decode('utf-8')
-            db.session.commit()
-            return jsonify({"message": "Senha redefinida com sucesso."})
-    except Exception as e:
-        return jsonify({"error": "Token inválido ou expirado."}), 400
+    if not email or not password or not user_type:
+        return jsonify({"error": "Email, senha e tipo de usuário são obrigatórios"}), 400
+
+    if User.query.filter_by(email=email).first():
+        return jsonify({"error": "Email já cadastrado"}), 400
+
+    hashed_password = bcrypt.generate_password_hash(password).decode('utf-8')
+    new_user = User(email=email, password=hashed_password, user_type=user_type)
+    db.session.add(new_user)
+    db.session.commit()
+
+    return jsonify({"message": "Usuário registrado com sucesso"}), 201
+
+# Rota para recuperação de senha
+@auth.route('/forgot-password', methods=['POST'])
+def forgot_password():
+    data = request.json
+    email = data.get('email')
+
+    if not email:
+        return jsonify({"error": "Email é obrigatório"}), 400
+
+    user = User.query.filter_by(email=email).first()
+    if not user:
+        return jsonify({"error": "Usuário não encontrado"}), 404
+
+    # Exemplo simples de envio de email
+    reset_link = f"http://example.com/reset-password?email={email}"  # Link fictício
+    msg = Message(
+        subject="Recuperação de senha",
+        sender="seuemail@gmail.com",
+        recipients=[email],
+        body=f"Olá, clique no link para redefinir sua senha: {reset_link}"
+    )
+    mail.send(msg)
+
+    return jsonify({"message": "Instruções de recuperação enviadas para o email"}), 200
