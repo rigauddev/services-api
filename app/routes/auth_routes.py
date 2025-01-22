@@ -2,7 +2,6 @@ from flask import Blueprint, request, jsonify
 from ..models.user_model import User
 from .. import db, bcrypt
 
-# Defina o Blueprint
 auth = Blueprint('auth', __name__)
 
 @auth.route('/login', methods=['POST'])
